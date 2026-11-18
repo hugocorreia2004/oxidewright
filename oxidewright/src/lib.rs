@@ -130,6 +130,7 @@ mod frame;
 mod frame_selectors;
 mod frame_wait;
 mod har;
+pub mod human;
 pub mod input;
 pub mod js;
 mod js_handle;

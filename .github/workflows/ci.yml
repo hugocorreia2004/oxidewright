@@ -6,6 +6,12 @@ on:
 
 name: Continuous integration
 
+# A new push to the same branch or pull request cancels the runs still going
+# for the older commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Check
