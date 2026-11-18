@@ -227,8 +227,8 @@ Current OOPIF limitations include:
 
 ## Generated Code
 
-The [`chromiumoxide_pdl`](../chromiumoxide_pdl) crate contains a [PDL parser](../chromiumoxide_pdl/src/pdl/parser.rs), which is a rust rewrite of a [python script in the chromium source tree](https://chromium.googlesource.com/deps/inspector_protocol/+/refs/heads/master/pdl.py) and a [`Generator`](../chromiumoxide_pdl/src/build/generator.rs) that turns the parsed PDL files into rust code. The [`chromiumoxide_cdp`](../chromiumoxide_cdp) crate only purpose is to invoke the generator during its [build process](../chromiumoxide_cdp/build.rs) and [include the generated output](../chromiumoxide_cdp/src/lib.rs) before compiling the crate itself. This separation is done merely because the generated output is ~60K lines of rust code (not including all the proc macro expansions). So expect the compiling to take some time.
-The generator can be configured and used independently, see [chromiumoxide_cdp/build.rs](../chromiumoxide_cdp/build.rs).
+The [`chromiumoxide_pdl`](../chromiumoxide_pdl) crate contains a [PDL parser](../chromiumoxide_pdl/src/pdl/parser.rs), which is a rust rewrite of a [python script in the chromium source tree](https://chromium.googlesource.com/deps/inspector_protocol/+/refs/heads/master/pdl.py) and a [`Generator`](../chromiumoxide_pdl/src/build/generator.rs) that turns the parsed PDL files into rust code. The [`chromiumoxide_cdp`](../chromiumoxide_cdp) crate holds the [generated output](../chromiumoxide_cdp/src/cdp.rs), written by the generator from its [`generate` test](../chromiumoxide_cdp/tests/generate.rs) and committed, and [includes it](../chromiumoxide_cdp/src/lib.rs). This separation is done merely because the generated output is ~60K lines of rust code (not including all the proc macro expansions). So expect the compiling to take some time.
+The generator can be configured and used independently, see [chromiumoxide_cdp/tests/generate.rs](../chromiumoxide_cdp/tests/generate.rs).
 
 Every chrome pdl domain is put in its own rust module, the types for the page domain of the browser_protocol are in `chromiumoxide_cdp::cdp::browser_protocol::page`, the runtime domain of the js_protocol in `chromiumoxide_cdp::cdp::js_protocol::runtime` and so on.
 
@@ -268,7 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Known Issues
 
-- The rust files generated for the PDL files in [chromiumoxide_cdp](.././chromiumoxide_cdp) don't compile when support for experimental types is manually turned off (`export CDP_NO_EXPERIMENTAL=true`). This is because the use of some experimental pdl types in the `*.pdl` files themselves are not marked as experimental.
+- The rust files generated for the PDL files in [chromiumoxide_cdp](../chromiumoxide_cdp) don't compile when support for experimental types is manually turned off (`export CDP_NO_EXPERIMENTAL=true`). This is because the use of some experimental pdl types in the `*.pdl` files themselves are not marked as experimental.
 
 ## Troubleshooting
 
