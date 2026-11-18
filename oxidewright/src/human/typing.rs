@@ -248,30 +248,38 @@ impl Writer<'_> {
             self.release_shift().await?;
         }
         let shift_bits = if self.shift.is_some() { MOD_SHIFT } else { 0 };
+        // AltGr is Ctrl + Alt on Windows (a real keyboard sends left Ctrl and
+        // right Alt). Elsewhere it is its own key, AltGraph, without Ctrl or
+        // Alt: Chrome on Linux takes a Ctrl+Alt key as a shortcut and types
+        // nothing. What counts is the system Chrome runs on, which is the
+        // one this program runs on when it launches it.
+        let windows_altgr = s.altgr && cfg!(windows);
         if s.altgr {
-            // AltGr on Windows: left Ctrl and right Alt almost together.
-            self.send(key_event(
-                true,
-                "Control",
-                "ControlLeft",
-                "",
-                shift_bits | MOD_CTRL,
-                1,
-            ))
-            .await?;
-            self.human.sleep(rnd.uniform(1.0, 6.0)).await;
+            if windows_altgr {
+                self.send(key_event(
+                    true,
+                    "Control",
+                    "ControlLeft",
+                    "",
+                    shift_bits | MOD_CTRL,
+                    1,
+                ))
+                .await?;
+                self.human.sleep(rnd.uniform(1.0, 6.0)).await;
+            }
+            let held = if windows_altgr { MOD_CTRL | MOD_ALT } else { 0 };
             self.send(key_event(
                 true,
                 "AltGraph",
                 "AltRight",
                 "",
-                shift_bits | MOD_CTRL | MOD_ALT,
+                shift_bits | held,
                 2,
             ))
             .await?;
             self.human.sleep(rnd.uniform(35.0, 100.0)).await;
         }
-        let mods = shift_bits | if s.altgr { MOD_CTRL | MOD_ALT } else { 0 };
+        let mods = shift_bits | if windows_altgr { MOD_CTRL | MOD_ALT } else { 0 };
         self.send(key_event(true, &s.key, &s.code, &s.text, mods, 0))
             .await?;
         self.human.sleep(dwell_ms).await;
@@ -279,24 +287,27 @@ impl Writer<'_> {
             .await?;
         if s.altgr {
             self.human.sleep(rnd.uniform(15.0, 60.0)).await;
+            let held = if windows_altgr { MOD_CTRL } else { 0 };
             self.send(key_event(
                 false,
                 "AltGraph",
                 "AltRight",
                 "",
-                shift_bits | MOD_CTRL,
+                shift_bits | held,
                 2,
             ))
             .await?;
-            self.send(key_event(
-                false,
-                "Control",
-                "ControlLeft",
-                "",
-                shift_bits,
-                1,
-            ))
-            .await?;
+            if windows_altgr {
+                self.send(key_event(
+                    false,
+                    "Control",
+                    "ControlLeft",
+                    "",
+                    shift_bits,
+                    1,
+                ))
+                .await?;
+            }
         }
         Ok(())
     }

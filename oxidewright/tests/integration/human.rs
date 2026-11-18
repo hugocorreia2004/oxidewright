@@ -98,7 +98,13 @@ fn types_with_the_keys_of_the_layout() {
         let a = down("A");
         assert!(a.shift && a.code.as_deref() == Some("KeyA"));
         let at = down("@");
-        assert!(at.ctrl && at.alt && !at.shift && at.code.as_deref() == Some("Digit2"));
+        // AltGr: Ctrl+Alt on Windows, its own key (no Ctrl/Alt) elsewhere.
+        assert_eq!(at.ctrl && at.alt, cfg!(windows));
+        assert!(!at.shift && at.code.as_deref() == Some("Digit2"));
+        assert!(
+            ev.iter()
+                .any(|e| e.kind == "keydown" && e.key.as_deref() == Some("AltGraph"))
+        );
         assert_eq!(down("ç").code.as_deref(), Some("Semicolon"));
         // `ã` is the dead key ~ then `a`.
         assert!(ev.iter().any(|e| e.kind == "keydown"
@@ -391,7 +397,11 @@ fn picks_the_keyboard_of_the_browser_language() {
                 .unwrap_or_else(|| panic!("{locale}: no keydown for {key}"));
             assert_eq!(down.code.as_deref(), Some(code), "{locale} {key}");
             assert_eq!(down.shift, shift, "{locale} {key} shift");
-            assert_eq!(down.ctrl && down.alt, altgr, "{locale} {key} altgr");
+            assert_eq!(
+                down.ctrl && down.alt,
+                altgr && cfg!(windows),
+                "{locale} {key} altgr"
+            );
             context.close().await.unwrap();
         }
         // A layout chosen by the script wins over the browser language.
