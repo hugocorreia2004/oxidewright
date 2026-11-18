@@ -20,6 +20,7 @@ mod forms;
 mod frames;
 mod global_fetch;
 mod handles;
+mod human;
 mod input;
 mod jshandle;
 mod locators;

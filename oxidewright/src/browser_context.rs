@@ -160,6 +160,9 @@ pub(crate) struct ContextInner {
     /// The browser of a persistent context, kept alive by it (the caller
     /// only holds the context); released when the browser closes.
     kept_browser: Mutex<Option<Browser>>,
+    /// The simulated person using this context (`BrowserContext::human`),
+    /// dropped when the context closes.
+    pub(crate) human: Mutex<Option<crate::human::Human>>,
 }
 
 impl fmt::Debug for BrowserContext {
@@ -204,6 +207,7 @@ impl BrowserContext {
                 emu: Default::default(),
                 owner_page: Mutex::new(None),
                 kept_browser: Mutex::new(None),
+                human: Mutex::new(None),
             }),
         }
     }

@@ -354,6 +354,11 @@ impl BrowserContext {
 
     /// Emit the context `close` event (called by `close`).
     pub(crate) fn emit_closed(&self) {
+        // The context's simulated person goes with it.
+        let human = self.inner.human.lock().unwrap().take();
+        if let Some(human) = human {
+            human.forget_all();
+        }
         self.inner
             .ext
             .listeners

@@ -154,8 +154,42 @@ Opt-in features that **are** detectable when you enable them:
 | Clock, coverage, CDP sessions, selectors (`register`, `set_test_id_attribute`) | Implemented |
 | Workers, service workers | Implemented |
 | Assertions (`expect`) | Implemented: locator, page and API response matchers incl. `to_match_aria_snapshot` and `to_have_screenshot`, `expect::poll` and `expect::to_pass`; no soft assertions or `expect.extend` (see [Assertions](#assertions-expect)) |
-| Also implemented | `wait_for_function`, `wait_for_timeout`, `expose_function`/`expose_binding`, `add_locator_handler`, `route_web_socket`, `aria_snapshot`, `get_by_ref`, `page.screencast()`, `browser.start_tracing` |
+| Also implemented | Human-like input ([`oxidewright::human`](#human-like-input-oxidewrighthuman)), `wait_for_function`, `wait_for_timeout`, `expose_function`/`expose_binding`, `add_locator_handler`, `route_web_socket`, `aria_snapshot`, `get_by_ref`, `page.screencast()`, `browser.start_tracing` |
 | Missing | `pause`/inspector, WebMCP, `launch_server`/`connect`, client certificates of browser contexts, the `exposeFunctions` option, routes on the very first request of a `noopener` popup or of an out-of-process iframe (see [docs/from-playwright.md](docs/from-playwright.md#not-ported-as-classes)) |
+
+## Human-like input (`oxidewright::human`)
+
+Not part of Playwright: a `Human` is one simulated person, with traits drawn
+once (speed, typing rhythm, key hold times, hand tremor, fatigue, scroll
+style), whose mouse, keyboard, pauses and scrolling look like a person's.
+
+```rust,no_run
+# async fn run(page: oxidewright::Page) -> oxidewright::Result<()> {
+use oxidewright::human::{Human, KeyboardLayout, PauseKind, ReadingKind};
+
+// The person of this browser context: created on first use, the same one
+// after that, dropped when the context (or the browser) closes.
+page.context().unwrap().set_human(Human::new().layout(KeyboardLayout::Es));
+let human = page.human();
+human.read(&page, ReadingKind::ScanningPage).await;
+human.type_text(&page.locator("#name"), "María").await?;
+human.type_text(&page.locator("#dob"), "14031987").groups([2, 2, 4]).await?;
+human.type_verified(&page.locator("#password"), "s3cret!").await?;
+human.click(&page.locator("button[type=submit]")).await?;
+human.pause(PauseKind::AfterSubmit).await;
+# Ok(()) }
+```
+
+| What | How |
+|---|---|
+| Mouse | Curved paths with Perlin tremor, Fitts' law timing, a speed cap, occasional overshoot; `grid(dpr, frame_ms)` puts every point on the physical pixel grid at one move per display frame |
+| Clicks | Off-center aim, the box checked again before pressing, a human hold time, the hand drifting away after; elements brought into view with the wheel (option lists inside menus too) |
+| Typing | Log-logistic flight times, digraphs, hand alternation, warm-up, fatigue, hesitations, pauses at letter/digit/punctuation boundaries and between number groups, typos corrected like a person, the real keys of the US, UK, PT or ES layout (Shift, AltGr, dead keys), chosen with `layout(..)` or else from the browser's language (`es-ES` → Spanish) |
+| Fields | `fix_field` corrects a value in place (click at the mistake, delete only what is wrong), `append_to_field`, `type_verified` |
+| Pauses | `pause`, `read`, `think`, `maybe_distraction`, with the mouse drifting meanwhile; `read_text` reads a text with the mouse resting near the next target |
+| Scrolling | Gliding wheel pushes in gestures, in the person's style; `explore` looks over a page |
+| Touch | `mobile(true)`: taps and swipes instead of clicks and the wheel |
+| Lifetime | One person per browser context (`context.human()`, `page.human()`), dropped when the context or the browser closes, even when the window is closed by hand; each page has its own mouse position, forgotten when the page closes. `Human::new()` / `with_seed(n)` make a person you own yourself |
 
 ## Assertions (`expect`)
 
