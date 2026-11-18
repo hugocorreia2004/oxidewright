@@ -353,7 +353,7 @@ More in the [library README](oxidewright/README.md) and the runnable
 |---|---|
 | [`oxidewright/`](oxidewright) | the library, its [reference README](oxidewright/README.md), examples and the ported test suite |
 | [`oxidewright/xtask/`](oxidewright/xtask) | maintenance: regenerates the bundled Playwright/Patchright scripts |
-| `src/`, `chromiumoxide_*/` | the DevTools Protocol layer, a fork of [chromiumoxide](https://github.com/mattsse/chromiumoxide) ([docs/protocol-layer.md](docs/protocol-layer.md)) |
+| `src/`, `oxidewright_cdp/`, `oxidewright_types/`, `oxidewright_pdl/`, `oxidewright_fetcher/` | the DevTools Protocol layer, a fork of [chromiumoxide](https://github.com/mattsse/chromiumoxide) ([docs/protocol-layer.md](docs/protocol-layer.md)) |
 
 ## Credits and license
 
