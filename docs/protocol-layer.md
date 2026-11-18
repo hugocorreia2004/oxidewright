@@ -1,8 +1,8 @@
 # chromiumoxide (the protocol layer of oxidewright)
 
-This is the DevTools Protocol layer of [oxidewright](README.md): a fork of
+This is the DevTools Protocol layer of [oxidewright](../README.md): a fork of
 [chromiumoxide](https://github.com/mattsse/chromiumoxide) by Matthias Seitz and contributors,
-with a `stealth` feature and the fixes listed in the [changelog](CHANGELOG.md). Its original
+with a `stealth` feature and the fixes listed in the [changelog](../CHANGELOG.md). Its original
 README follows, adapted to this repository.
 
 chromiumoxide provides a high-level and async API to control Chrome or Chromium over the [DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/). It comes with support for all types of the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) and can launch a [headless](https://developers.google.com/web/updates/2017/04/headless-chrome) or full (non-headless) Chrome or Chromium instance or connect to an already running instance.
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The current API still lacks some functionality, but the [`Page::execute`](src/page.rs) function allows sending all `chromiumoxide_types::Command` types (see [Generated Code](#generated-code)). Most `Element` and `Page` functions are basically just simplified command constructions and combinations, like `Page::pdf`:
+The current API still lacks some functionality, but the [`Page::execute`](../src/page.rs) function allows sending all `chromiumoxide_types::Command` types (see [Generated Code](#generated-code)). Most `Element` and `Page` functions are basically just simplified command constructions and combinations, like `Page::pdf`:
 
 ```rust
 pub async fn pdf(&self, params: PrintToPdfParams) -> Result<Vec<u8>> {
@@ -93,7 +93,7 @@ for frame in page.all_frames().await? {
 Frame handles support raw `execute`, JavaScript `eval`, `query_selector`, navigation,
 navigation waiting, and parent/child traversal. Elements returned by a frame retain the
 same session and can be queried, clicked, hovered, measured, and explicitly disposed.
-See [`examples/iframe.rs`](examples/iframe.rs) for a complete example.
+See [`examples/iframe.rs`](../examples/iframe.rs) for a complete example.
 
 Navigate a frame with `Frame::goto`, which pins both the frame and its session. Raw
 `Frame::execute` rejects `Page.navigate` with `CdpError::NotAllowed`, because a raw command
@@ -135,8 +135,8 @@ requests; a raw `Page::execute(ContinueRequestParams { .. })` is a main-session 
 Dropping a delivered `PausedRequest` has no protocol side effect, so every request that
 must be released needs an explicit response. Dropping the stream allows a later stream to
 register, but does not answer already delivered requests. See
-[`examples/interception.rs`](examples/interception.rs) and
-[`examples/block-navigation.rs`](examples/block-navigation.rs).
+[`examples/interception.rs`](../examples/interception.rs) and
+[`examples/block-navigation.rs`](../examples/block-navigation.rs).
 
 Await ordering-sensitive state changes such as `authenticate` and
 `set_request_interception` before `Page::goto` or `Frame::goto`. Their futures establish
@@ -183,7 +183,7 @@ and the user agent, which changes the fingerprint and can itself be detected.
 
 ## oxidewright: the Playwright API in Rust
 
-This repository's main crate is [`oxidewright`](oxidewright/README.md), which that ports the
+This repository's main crate is [`oxidewright`](../oxidewright/README.md), which ports the
 [Playwright](https://playwright.dev) API (Chromium only) on top of chromiumoxide: locators,
 auto-waiting actions, network routing, events, emulation, storage state, HAR, tracing and more,
 with the same class and method names in `snake_case`. It enables the `stealth` feature above by
@@ -227,8 +227,8 @@ Current OOPIF limitations include:
 
 ## Generated Code
 
-The [`chromiumoxide_pdl`](chromiumoxide_pdl) crate contains a [PDL parser](chromiumoxide_pdl/src/pdl/parser.rs), which is a rust rewrite of a [python script in the chromium source tree](https://chromium.googlesource.com/deps/inspector_protocol/+/refs/heads/master/pdl.py) and a [`Generator`](chromiumoxide_pdl/src/build/generator.rs) that turns the parsed PDL files into rust code. The [`chromiumoxide_cdp`](chromiumoxide_cdp) crate only purpose is to invoke the generator during its [build process](chromiumoxide_cdp/build.rs) and [include the generated output](chromiumoxide_cdp/src/lib.rs) before compiling the crate itself. This separation is done merely because the generated output is ~60K lines of rust code (not including all the proc macro expansions). So expect the compiling to take some time.
-The generator can be configured and used independently, see [chromiumoxide_cdp/build.rs](chromiumoxide_cdp/build.rs).
+The [`chromiumoxide_pdl`](../chromiumoxide_pdl) crate contains a [PDL parser](../chromiumoxide_pdl/src/pdl/parser.rs), which is a rust rewrite of a [python script in the chromium source tree](https://chromium.googlesource.com/deps/inspector_protocol/+/refs/heads/master/pdl.py) and a [`Generator`](../chromiumoxide_pdl/src/build/generator.rs) that turns the parsed PDL files into rust code. The [`chromiumoxide_cdp`](../chromiumoxide_cdp) crate only purpose is to invoke the generator during its [build process](../chromiumoxide_cdp/build.rs) and [include the generated output](../chromiumoxide_cdp/src/lib.rs) before compiling the crate itself. This separation is done merely because the generated output is ~60K lines of rust code (not including all the proc macro expansions). So expect the compiling to take some time.
+The generator can be configured and used independently, see [chromiumoxide_cdp/build.rs](../chromiumoxide_cdp/build.rs).
 
 Every chrome pdl domain is put in its own rust module, the types for the page domain of the browser_protocol are in `chromiumoxide_cdp::cdp::browser_protocol::page`, the runtime domain of the js_protocol in `chromiumoxide_cdp::cdp::js_protocol::runtime` and so on.
 
@@ -268,7 +268,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Known Issues
 
-- The rust files generated for the PDL files in [chromiumoxide_cdp](./chromiumoxide_cdp) don't compile when support for experimental types is manually turned off (`export CDP_NO_EXPERIMENTAL=true`). This is because the use of some experimental pdl types in the `*.pdl` files themselves are not marked as experimental.
+- The rust files generated for the PDL files in [chromiumoxide_cdp](.././chromiumoxide_cdp) don't compile when support for experimental types is manually turned off (`export CDP_NO_EXPERIMENTAL=true`). This is because the use of some experimental pdl types in the `*.pdl` files themselves are not marked as experimental.
 
 ## Troubleshooting
 
@@ -280,9 +280,9 @@ A: Check that your chromium language settings are set to English. `chromiumoxide
 
 Licensed under either of these:
 
-- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or
+- Apache License, Version 2.0, ([LICENSE-APACHE](../LICENSE-APACHE) or
   <https://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+- MIT license ([LICENSE-MIT](../LICENSE-MIT) or
   <https://opensource.org/licenses/MIT>)
 
 ## References

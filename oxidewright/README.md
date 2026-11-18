@@ -1,7 +1,7 @@
 # oxidewright
 
 A Rust port of the [Playwright](https://playwright.dev) API for Chromium, built on top of
-[chromiumoxide](../CHROMIUMOXIDE.md), with [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)-level
+[chromiumoxide](../docs/protocol-layer.md), with [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)-level
 stealth: the protocol traces that page scripts can observe are never left behind.
 
 > **Disclaimer.** oxidewright is an independent project. It is inspired by Playwright and
