@@ -6,8 +6,8 @@ edition = "2024"
 rust-version = "1.85"
 description = "Contains all the generated types for chromiumoxide"
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/mattsse/chromiumoxide"
-repository = "https://github.com/mattsse/chromiumoxide"
+homepage = "https://github.com/hugocorreia2004/oxidewright"
+repository = "https://github.com/hugocorreia2004/oxidewright"
 readme = "../README.md"
 include = ["src/**/*", "*.pdl", "LICENSE-*"]
 

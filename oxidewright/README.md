@@ -1,7 +1,7 @@
 # oxidewright
 
 A Rust port of the [Playwright](https://playwright.dev) API for Chromium, built on top of
-[chromiumoxide](../README.md), with [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)-level
+[chromiumoxide](../CHROMIUMOXIDE.md), with [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)-level
 stealth: the protocol traces that page scripts can observe are never left behind.
 
 > **Disclaimer.** oxidewright is an independent project. It is inspired by Playwright and
@@ -15,7 +15,7 @@ oxidewright is not published on crates.io. Depend on it from git:
 
 ```toml
 [dependencies]
-oxidewright = { git = "https://github.com/hugocorreia2004/chromiumoxide" }
+oxidewright = { git = "https://github.com/hugocorreia2004/oxidewright" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -129,8 +129,8 @@ Opt-in features that **are** detectable when you enable them:
   `.viewport(None)` to keep the window size); the default context of `connect_over_cdp`
   overrides nothing; unset media features are not forced to `light`/`no-preference`.
 * CDP sessions (`new_cdp_session`) share the page session: whatever you send is your call.
-* `route_web_socket` is deliberately absent: Playwright implements it with a script injected
-  into the page.
+* `route_web_socket` injects Playwright's WebSocket mock script into the page and adds the
+  `__pwWebSocketBinding` binding, like Playwright: pages can detect it while it is in use.
 
 ## Feature matrix
 

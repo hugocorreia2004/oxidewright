@@ -1,291 +1,371 @@
-# chromiumoxide
+<h1 align="center">oxidewright</h1>
 
-![Build](https://github.com/mattsse/chromiumoxide/workflows/Continuous%20integration/badge.svg)
-[![Crates.io](https://img.shields.io/crates/v/chromiumoxide.svg)](https://crates.io/crates/chromiumoxide)
-[![Documentation](https://docs.rs/chromiumoxide/badge.svg)](https://docs.rs/chromiumoxide)
+<p align="center">
+  <b>Playwright for Rust: no Node.js, Patchright-level stealth, human-like input.</b>
+</p>
 
-chromiumoxide provides a high-level and async API to control Chrome or Chromium over the [DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/). It comes with support for all types of the [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/) and can launch a [headless](https://developers.google.com/web/updates/2017/04/headless-chrome) or full (non-headless) Chrome or Chromium instance or connect to an already running instance.
+<p align="center">
+  <a href="https://github.com/hugocorreia2004/oxidewright/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/hugocorreia2004/oxidewright/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="MSRV 1.85" src="https://img.shields.io/badge/rust-1.85%2B-orange">
+  <img alt="License MIT or Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
+</p>
 
-## Usage
+oxidewright lets a Rust program drive Chrome the way [Playwright](https://playwright.dev)
+does: open pages, find elements, click, type, wait for the network, mock requests, take
+screenshots, save logins. It has Playwright's API (version 1.65, Chromium only) and is written
+in Rust from the ground up, so there is **no Node.js** to install or run next to your program.
+
+It is built for automation that must not look automated: it never sends the protocol commands
+that pages detect (like [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright)), and
+it can move the mouse and type like a person.
+
+**Contents:** [Install](#install) · [Quick start](#quick-start) · [Guide](#guide) ·
+[Human-like input](#human-like-input) · [Stealth](#stealth) · [Status](#status) ·
+[Coming from Playwright](#coming-from-playwright) · [Credits and license](#credits-and-license)
+
+## Install
+
+```toml
+[dependencies]
+oxidewright = { git = "https://github.com/hugocorreia2004/oxidewright" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+You need Rust 1.85 or newer and Chrome or Chromium installed (it is found on its own; or pass
+`.executable_path("...")` to `launch()`). oxidewright is not on crates.io yet.
+
+## Quick start
 
 ```rust
-use futures::StreamExt;
-
-use chromiumoxide::browser::{Browser, BrowserConfig};
+use oxidewright::chromium;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // create a `Browser` that spawns a `chromium` process running with UI (`with_head()`, headless is default)
-    // and the handler that drives the websocket etc.
-    let (mut browser, mut handler) =
-        Browser::launch(BrowserConfig::builder().with_head().build()?).await?;
+async fn main() -> oxidewright::Result<()> {
+    let browser = chromium().launch().await?;
+    let page = browser.new_page().await?;
+    page.goto("https://example.com").await?;
 
-    // spawn a new task that continuously polls the handler
-    let handle = tokio::spawn(async move {
-        while let Some(h) = handler.next().await {
-            if h.is_err() {
-                break;
-            }
-        }
-    });
-
-    // create a new browser page and navigate to the url
-    let page = browser.new_page("https://en.wikipedia.org").await?;
-
-    // find and click the search toggle button to reveal the search bar
-    page.find_element(".search-toggle").await?.click().await?;
-
-    // find the search bar type into the search field and hit `Enter`,
-    // this triggers a new navigation to the search result page
-    page.find_element("input[name='search']")
-        .await?
-        .click()
-        .await?
-        .type_str("Rust programming language")
-        .await?
-        .press_key("Enter")
-        .await?;
-
-    let html = page.wait_for_navigation().await?.content().await?;
+    println!("title: {}", page.title().await?);
+    page.get_by_role("link").first().click().await?;
+    page.screenshot().path("page.png").await?;
 
     browser.close().await?;
-    handle.await?;
     Ok(())
 }
 ```
 
-The current API still lacks some functionality, but the [`Page::execute`](src/page.rs) function allows sending all `chromiumoxide_types::Command` types (see [Generated Code](README.md#generated-code)). Most `Element` and `Page` functions are basically just simplified command constructions and combinations, like `Page::pdf`:
+Every call that talks to the browser is `async` and returns `oxidewright::Result`. Options are
+methods chained before `.await`: `page.goto(url).timeout(5_000).await`.
+
+## Guide
+
+### Open a browser
 
 ```rust
-pub async fn pdf(&self, params: PrintToPdfParams) -> Result<Vec<u8>> {
-    let res = self.execute(params).await?;
-    Ok(base64::decode(&res.data)?)
-}
+use oxidewright::{chromium, ProxySettings};
+
+// A new, temporary browser. Visible window, through a proxy.
+let browser = chromium()
+    .launch()
+    .headless(false)
+    .proxy(ProxySettings::new("http://proxy.example:8080"))
+    .await?;
+
+// A browser with a profile folder that is kept (logins survive restarts).
+let context = chromium().launch_persistent_context("profiles/ana").await?;
+let page = context.pages()[0].clone(); // the window it opened with
+
+// A browser that is already running (an anti-detect browser profile, say),
+// started with --remote-debugging-port=9222.
+let browser = chromium().connect_over_cdp("http://127.0.0.1:9222").await?;
+let context = browser.contexts()[0].clone(); // its tabs: context.pages()
 ```
 
-If you need something else, the `Page::execute` function allows for writing your own command wrappers. PRs are very welcome if you think a meaningful command is missing a designated function.
+Several browsers run at the same time from one program: give each its own tokio task. They do
+not wait for each other, since each one has its own connection.
 
-## Frames and cross-origin iframes
+### Contexts and pages
 
-`Page::main_frame`, `Page::all_frames`, and `Page::frame_by_id` return `Frame`
-handles pinned to the CDP session that owned the frame when the handle was created.
-That lets the same API work for ordinary child frames and out-of-process iframes
-(OOPIFs):
+A **context** is an independent browser session (its own cookies, storage, cache), like an
+incognito window. A **page** is a tab.
 
 ```rust
-for frame in page.all_frames().await? {
-    println!(
-        "frame={} session={} oop={} url={:?}",
-        frame.id().as_ref(),
-        frame.session_id().as_ref(),
-        frame.is_out_of_process(),
-        frame.url(),
-    );
+use oxidewright::{devices, ViewportSize};
 
-    if frame.is_out_of_process() {
-        let title: String = frame.eval("document.title").await?.into_value()?;
-        println!("child title: {title}");
-    }
-}
+let context = browser
+    .new_context()
+    .locale("es-ES")
+    .timezone_id("Europe/Madrid")
+    .viewport(Some(ViewportSize { width: 1366, height: 768 }))
+    .await?;
+let page = context.new_page().await?;
+
+// Or a phone: viewport, user agent, touch, device scale factor.
+let phone = browser.new_context().device(&devices()["iPhone 15"]).await?;
 ```
 
-Frame handles support raw `execute`, JavaScript `eval`, `query_selector`, navigation,
-navigation waiting, and parent/child traversal. Elements returned by a frame retain the
-same session and can be queried, clicked, hovered, measured, and explicitly disposed.
-See [`examples/iframe.rs`](examples/iframe.rs) for a complete example.
-
-Navigate a frame with `Frame::goto`, which pins both the frame and its session. Raw
-`Frame::execute` rejects `Page.navigate` with `CdpError::NotAllowed`, because a raw command
-loses the frame identity a navigation watcher needs and would target the page's main frame.
-
-A frame can move to another CDP session during a process swap. An old handle then returns
-`CdpError::FrameNotReady`; enumerate the frames again or call `frame_by_id` to obtain a
-fresh handle. There is a short browser-controlled swap-in window where a frame can be
-attached but its OOP session is not yet ready, so retry `FrameNotReady` operations after
-refreshing the handle.
-
-When a page target is destroyed or the connection closes, in-flight frame operations are
-settled with a typed error rather than a channel cancellation: `Frame::wait_for_navigation`
-resolves to `CdpError::FrameNotReady`, while `Page::goto` / `Frame::goto` resolve to
-`CdpError::NoResponse`. `Frame::fetch_url` is the one read that follows the frame's current
-session instead of failing on a stale handle; see its rustdoc.
-
-## Managed request interception
-
-Use `PausedRequest` as the response capability for Fetch interception. Register the stream
-first, await Chrome-side enablement second, and only then navigate:
+### Navigate and wait
 
 ```rust
-let mut paused_requests = page.paused_requests().await?;
-page.set_request_interception(true).await?;
+use oxidewright::LoadState;
 
-while let Some(paused) = paused_requests.next().await {
-    if paused.event().request.url.ends_with(".png") {
-        paused.fail(ErrorReason::BlockedByClient).await?;
-    } else {
-        paused.continue_request().await?;
-    }
-}
+page.goto("https://example.com/login").await?;
+page.goto("https://example.com/feed").wait_until(LoadState::NetworkIdle).await?;
+page.wait_for_url("**/dashboard").await?;     // after a redirect
+page.wait_for_load_state().state(LoadState::DomContentLoaded).await?;
+page.reload().await?;
+page.go_back().await?;
 ```
 
-`continue_request`, `continue_with`, `fulfill`, and `fail` consume the handle and always
-use the request id and CDP session captured with the pause. This is required for OOPIF
-requests; a raw `Page::execute(ContinueRequestParams { .. })` is a main-session operation.
-Dropping a delivered `PausedRequest` has no protocol side effect, so every request that
-must be released needs an explicit response. Dropping the stream allows a later stream to
-register, but does not answer already delivered requests. See
-[`examples/interception.rs`](examples/interception.rs) and
-[`examples/block-navigation.rs`](examples/block-navigation.rs).
+### Find elements
 
-Await ordering-sensitive state changes such as `authenticate` and
-`set_request_interception` before `Page::goto` or `Frame::goto`. Their futures establish
-the ordering; launching them concurrently with navigation does not.
+A **locator** describes how to find an element. It is resolved when it is used, so it always
+finds the current element, and it waits for it to appear.
 
-If either update returns an error, retry it before navigating. The retry always sends a
-fresh idempotent Chrome configuration batch and waits for its acknowledgement. Until that
-retry succeeds, a newly attached OOPIF can briefly inherit the requested interception/auth
-state even though the main session did not confirm it; the failed caller has already received
-`Err`, so applications should treat the configuration as unavailable during that window.
+```rust
+use oxidewright::{GetByRoleOptions, LocatorOptions};
+
+page.get_by_role_with("button", GetByRoleOptions::new().name("Sign in")); // a button by its text
+page.get_by_label("Email");                 // an input by its <label>
+page.get_by_placeholder("you@example.com");
+page.get_by_text("Welcome back");
+page.get_by_test_id("submit");              // data-testid="submit"
+page.locator("form#login input[name=user]"); // any CSS selector
+
+// Narrow it down.
+page.get_by_role("listitem").filter(LocatorOptions::new().has_text("Banana"));
+page.locator(".result").nth(2);
+page.frame_locator("iframe#payment").get_by_label("Card number"); // inside an iframe
+```
+
+If a locator matches several elements where one is expected, the action fails with a clear
+error instead of picking one at random (Playwright's *strict mode*).
+
+### Act on elements
+
+Before acting, oxidewright waits until the element is visible, enabled, stable (not moving)
+and not covered by something else, like Playwright. No sleeps needed.
+
+```rust
+page.get_by_label("Email").fill("ana@example.com").await?;
+page.get_by_label("Password").fill("secret").await?;
+page.get_by_label("Password").press("Enter").await?;
+page.get_by_label("I accept the terms").check().await?;
+page.get_by_label("Country").select_option("ES").await?;
+page.get_by_label("Photo").set_input_files("photo.jpg").await?;
+page.get_by_text("Menu").hover().await?;
+page.get_by_role("button").click().timeout(5_000).await?; // fail after 5 s instead of 30 s
+```
+
+### Read the page
+
+```rust
+let text = page.locator("h1").inner_text().await?;
+let value = page.get_by_label("Email").input_value().await?;
+let count = page.locator(".result").count().await?;
+let visible = page.get_by_text("Error").is_visible().await?;
+
+// Run JavaScript; results come back as any serde type.
+let title: String = page.evaluate("() => document.title").await?;
+let sum: i32 = page.evaluate("([a, b]) => a + b").arg((1, 2)).await?;
+```
+
+### Check the result (assertions)
+
+`expect` retries until the condition holds or the timeout (5 s) passes, so it suits pages
+that change.
+
+```rust
+use oxidewright::expect::expect;
+
+expect(&page.locator("h1")).to_have_text("Welcome, Ana").await?;
+expect(&page.get_by_role("alert")).to_be_hidden().await?;
+expect(&page).to_have_url("https://example.com/dashboard").await?;
+```
+
+### Network: watch, mock, block
+
+```rust
+use oxidewright::Route;
+
+// Log every request.
+page.on_request(|request| println!("{} {}", request.method(), request.url()));
+
+// Answer an API call with your own data.
+page.route("**/api/user", |route: Route| async move {
+    route.fulfill().json(&serde_json::json!({ "name": "Ana" })).await
+}).await?;
+
+// Block images.
+page.route("**/*.{png,jpg}", |route: Route| async move { route.abort().await }).await?;
+
+// Wait for a response triggered by an action.
+let response = page
+    .expect_response("**/api/orders", page.get_by_text("Load more").click())
+    .await?;
+println!("{}", response.text().await?);
+```
+
+### Popups, dialogs and downloads
+
+```rust
+let popup = page.expect_popup(page.get_by_text("Open in new tab").click()).await?;
+popup.wait_for_load_state().await?;
+
+page.on_dialog(|dialog| {
+    tokio::spawn(async move { dialog.accept(None).await }); // OK on alert/confirm
+});
+
+let download = page.expect_download(page.get_by_text("Export").click()).await?;
+download.save_as("export.csv").await?;
+```
+
+### Keep a login (cookies and storage)
+
+```rust
+// After signing in once, save cookies and localStorage...
+context.storage_state().path("state.json").await?;
+// ...and start later sessions already signed in.
+let context = browser.new_context().storage_state("state.json").await?;
+```
+
+### Screenshots, PDF, traces
+
+```rust
+page.screenshot().path("page.png").full_page(true).await?;
+page.locator("#chart").screenshot().path("chart.png").await?;
+page.pdf().path("page.pdf").await?;
+
+// A trace of the session, viewable with `npx playwright show-trace trace.zip`.
+context.tracing().start().screenshots(true).await?;
+// ... do things ...
+context.tracing().stop().path("trace.zip").await?;
+```
+
+### Errors and timeouts
+
+Actions wait up to 30 s and navigations up to 30 s by default; change them per call
+(`.timeout(ms)`) or per context (`context.set_default_timeout(ms)`). Errors say what failed
+and why, like Playwright's:
+
+```text
+locator.click: Timeout 5000ms exceeded.
+Call log:
+  - waiting for getByRole('button', { name: 'Sign in' })
+  - element is not enabled
+```
+
+`err.is_timeout()` and `err.is_target_closed()` tell the common cases apart.
+
+## Human-like input
+
+Playwright moves the mouse in a straight jump and types at a fixed speed, which is easy to
+tell apart from a person. `oxidewright::human` (not part of Playwright) does it the way people
+do.
+
+```rust
+use oxidewright::human::{PauseKind, ReadingKind};
+
+let human = page.human(); // this browser's person: created on first use, the same one after
+
+human.read(&page, ReadingKind::ScanningPage).await;      // look at the page, mouse drifting
+human.click(&page.get_by_label("Name")).await?;          // move there and click
+human.type_text(&page.get_by_label("Name"), "María José").await?;
+human.type_text(&page.get_by_label("Birth date"), "14031987").groups([2, 2, 4]).await?;
+human.type_verified(&page.get_by_label("Email"), "maria@example.com").await?;
+human.click(&page.get_by_role("button")).await?;
+human.pause(PauseKind::AfterSubmit).await;
+```
+
+**One person per browser.** `page.human()` gives the person of that browser: when it is
+created, it draws its traits once and keeps them (how fast it is, how fast it types, how long
+it holds keys, how much its hand trembles, how it scrolls, whether it reads before clicking),
+so everything it does looks like the same person. It is dropped when the browser closes. To
+choose it instead: `context.set_human(Human::with_seed(7))` (the same seed always gives the
+same person).
+
+| What | How it looks like a person |
+|---|---|
+| Mouse | Curved paths with hand tremor; slower and more careful on small or far targets; sometimes goes past the target and corrects. Each page keeps its own mouse position, so there are no jumps |
+| Clicks | Aims off-center, holds the button for a human time, the hand drifts away after. Elements below the fold are reached with the mouse wheel, not jumped to |
+| Typing | Each key is pressed and released with human timings: faster on common letter pairs, slower at the start, after a while, around `@`, between letters and digits and between groups of a number. Makes typos and corrects them |
+| Keyboard | Uses the real keys of the US, UK, Portuguese or Spanish keyboard: `@` is AltGr+2 in Spain, `ñ` has its own key, `á` is the accent key then `a`. Taken from the browser's language, or set with `Human::new().layout(KeyboardLayout::Es)` |
+| Fields | `fix_field` corrects a wrong value by clicking where the mistake is; `type_verified` checks what was typed and fixes it |
+| Pauses and reading | `pause` after clicks, submits, page loads; `read` before acting; `read_text` reads a text with the mouse resting near what comes next |
+| Scrolling | `scroll` with wheel pushes that glide and slow down, in the person's own style |
+| Phones | `Human::new().mobile(true)`: taps and swipes instead of clicks and the wheel |
 
 ## Stealth
 
-With the `stealth` cargo feature chromiumoxide leaves no Chrome DevTools Protocol traces that
-page scripts can observe, in the manner of [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright):
+Websites can see some of the commands an automation tool sends to Chrome. Playwright and
+Puppeteer send them; oxidewright does not:
 
-```toml
-chromiumoxide = { version = "0.9", features = ["stealth"] }
-```
+- No `Runtime.enable`, `Log.enable` or `Performance.enable`, the best-known automation traces.
+- Its scripts run in isolated worlds (they share the page's elements, not its JavaScript),
+  created only when needed, with random names.
+- `page.evaluate` reaches the page's own JavaScript through the page itself (Patchright's
+  technique), so the page cannot tell how it was called.
+- Screenshots never bring the window to the front; interception is only on while you use it.
 
-- `Runtime.enable`, `Log.enable` and `Performance.enable` are never sent, and no utility world
-  or init script is registered when a target is attached. Paused child targets are still resumed
-  with `Runtime.runIfWaitingForDebugger`.
-- `Page::evaluate`, `Page::evaluate_expression`, `Page::evaluate_function`, `Frame::eval`,
-  `Frame::query_selector` and all `Element` APIs run in an isolated world created on demand per
-  frame with `Page.createIsolatedWorld` (random name, universal access). The world is cached per
-  frame document and dropped when the frame navigates to a new document, detaches or moves to
-  another session; out-of-process iframes get theirs through their own session. Elements are
-  resolved into that world, so page scripts never see calls made by chromiumoxide (the world
-  shares the DOM with the page but not its JavaScript globals).
-- `Page::evaluate_main_world` and `Frame::evaluate_main_world` run code in the page's main world
-  when its globals are needed (`Runtime.evaluate` of `globalThis` without a context id, then
-  `Runtime.callFunctionOn` on that object). Page scripts can observe what that code does.
-- `Page::expose_function` returns `CdpError::NotAllowed`: `Runtime.addBinding` adds a global the
-  page can find.
-- `Page::execution_context` and the related getters return the isolated world's context.
-- Calling `Page::enable_runtime`, `Page::enable_log` or sending `Runtime.enable` yourself undoes
-  the feature, and `Page::metrics` needs `Performance.enable`.
+Some features *are* visible to pages when you turn them on, such as console events, JavaScript
+coverage, and every emulation option (a viewport, user agent or locale you set is what the
+page sees). The [full list](oxidewright/README.md#stealth) says which.
 
-`stealth` only changes how chromiumoxide talks to the browser. It does **not** change the
-browser's fingerprint. `Page::enable_stealth_mode` and `Page::enable_stealth_mode_with_agent` are
-not part of the feature: they inject scripts that override `navigator` properties, WebGL values
-and the user agent, which changes the fingerprint and can itself be detected.
+Stealth here means not leaving automation traces. It does not change the browser's
+fingerprint (screen, fonts, WebGL...); use a real Chrome profile or an anti-detect browser
+through `connect_over_cdp` for that.
 
-## oxidewright: the Playwright API in Rust
+## Status
 
-This fork also hosts [`oxidewright`](oxidewright/README.md), a workspace crate that ports the
-[Playwright](https://playwright.dev) API (Chromium only) on top of chromiumoxide: locators,
-auto-waiting actions, network routing, events, emulation, storage state, HAR, tracing and more,
-with the same class and method names in `snake_case`. It enables the `stealth` feature above by
-default and never sends `Runtime.enable`. It is not on crates.io; depend on it from git:
+Implemented: browsers, contexts and pages (`launch`, persistent profiles, `connect_over_cdp`),
+frames including cross-origin iframes, locators and every action with Playwright's waiting
+rules, keyboard, mouse and touch, network interception, events, emulation and devices,
+cookies and storage state, screenshots and PDF, HAR, the `request` API, tracing, video,
+clock, coverage, workers and `expect` assertions.
 
-```toml
-oxidewright = { git = "https://github.com/hugocorreia2004/chromiumoxide" }
-```
+Not yet: the inspector (`pause`), WebMCP, `launch_server`/`connect`, client certificates on
+browser contexts, zipped HAR files, per-action events in traces. Only Chromium. The
+[feature matrix](oxidewright/README.md#feature-matrix) has the details.
 
-## Compatibility and current limitations
+Over two thousand of Playwright's own tests, ported to Rust, run on every change on Linux and
+Windows.
 
-The frame/OOPIF API has two intentional source-compatibility exceptions:
+## Coming from Playwright
 
-- `Element::node_id` is now `Option<NodeId>` because frame-scoped elements may only have a
-  remote object and backend node id.
-- `CdpError` is now `#[non_exhaustive]`. Making an existing public enum non-exhaustive is the
-  one-time source break here: after upgrading, a downstream exhaustive `match` on `CdpError`
-  must add a wildcard (`_`) arm. Once that arm exists, the new variants are additive and cost
-  nothing further — `FrameNotReady`, `PausedRequestResponderAlreadyRegistered`, and `NotAllowed`
-  (returned when a raw operation is submitted through an entry point that does not support it,
-  e.g. `Frame::execute(Page.navigate)` — use `Frame::goto` instead).
+The same classes and methods, in `snake_case`; options become chained methods:
 
-Existing `TargetMessage`, `GetExecutionContext`, the five-variant `NetworkEvent`, and legacy
-handler signatures remain unchanged.
+| Playwright (JS) | oxidewright |
+|---|---|
+| `await page.goto(url, { waitUntil: 'networkidle' })` | `page.goto(url).wait_until(LoadState::NetworkIdle).await?` |
+| `await page.getByRole('button', { name: 'OK' }).click()` | `page.get_by_role_with("button", GetByRoleOptions::new().name("OK")).click().await?` |
+| `await page.locator('#q').fill('rust')` | `page.locator("#q").fill("rust").await?` |
+| `await page.evaluate(([a, b]) => a + b, [1, 2])` | `page.evaluate::<i32>("([a, b]) => a + b").arg((1, 2)).await?` |
+| `page.on('request', r => ...)` | `page.on_request(\|r\| ...)` |
+| `await expect(locator).toHaveText('Hi')` | `expect(&locator).to_have_text("Hi").await?` |
 
-Current OOPIF limitations include:
+Every class, method by method: [docs/from-playwright.md](oxidewright/docs/from-playwright.md).
+More in the [library README](oxidewright/README.md) and the runnable
+[examples](oxidewright/examples) (`cargo run -p oxidewright --example locators_forms`).
 
-- `expose_function`, stealth helper replay, and dynamic user-agent replay remain
-  main-session-only.
-- High-level frame-scoped console/network event attribution and full cross-session response
-  body adoption are not exposed yet; typed raw events remain available.
-- Init scripts are replayed when added, but there is no public remove-init-script API.
-  The default behavior applies scripts to future documents rather than current contexts;
-  `runImmediately=true` is not guaranteed during paused OOPIF initialization.
-- `Element::dispose().await` releases its remote object explicitly. Dropping an `Element`
-  remains a local operation and does not send a release command.
+## Repository layout
 
-### Add chromiumoxide to your project
+| Path | What |
+|---|---|
+| [`oxidewright/`](oxidewright) | the library, its [reference README](oxidewright/README.md), examples and the ported test suite |
+| [`oxidewright/xtask/`](oxidewright/xtask) | maintenance: regenerates the bundled Playwright/Patchright scripts |
+| `src/`, `chromiumoxide_*/` | the DevTools Protocol layer, a fork of [chromiumoxide](https://github.com/mattsse/chromiumoxide) ([CHROMIUMOXIDE.md](CHROMIUMOXIDE.md)) |
 
-`chromiumoxide` only supports the [`tokio`](https://github.com/tokio-rs/tokio) runtime.
+## Credits and license
 
-## Generated Code
+The protocol layer started as [chromiumoxide](https://github.com/mattsse/chromiumoxide) by
+Matthias Seitz and contributors; its history is kept here. The bundled injected scripts come
+from [Playwright](https://github.com/microsoft/playwright) and
+[Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) (Apache-2.0); see
+[NOTICE](oxidewright/NOTICE).
 
-The [`chromiumoxide_pdl`](chromiumoxide_pdl) crate contains a [PDL parser](chromiumoxide_pdl/src/pdl/parser.rs), which is a rust rewrite of a [python script in the chromium source tree](https://chromium.googlesource.com/deps/inspector_protocol/+/refs/heads/master/pdl.py) and a [`Generator`](chromiumoxide_pdl/src/build/generator.rs) that turns the parsed PDL files into rust code. The [`chromiumoxide_cdp`](chromiumoxide_cdp) crate only purpose is to invoke the generator during its [build process](chromiumoxide_cdp/build.rs) and [include the generated output](chromiumoxide_cdp/src/lib.rs) before compiling the crate itself. This separation is done merely because the generated output is ~60K lines of rust code (not including all the proc macro expansions). So expect the compiling to take some time.
-The generator can be configured and used independently, see [chromiumoxide_cdp/build.rs](chromiumoxide_cdp/build.rs).
+oxidewright is an independent project, **not affiliated with, endorsed by or sponsored by
+Microsoft** or the Playwright or Patchright projects. "Playwright" is a trademark of Microsoft
+Corporation.
 
-Every chrome pdl domain is put in its own rust module, the types for the page domain of the browser_protocol are in `chromiumoxide_cdp::cdp::browser_protocol::page`, the runtime domain of the js_protocol in `chromiumoxide_cdp::cdp::js_protocol::runtime` and so on.
-
-[vanilla.aslushnikov.com](https://vanilla.aslushnikov.com/) is a great resource to browse all the types defined in the pdl files. This site displays `Command` types as defined in the pdl files as `Method`. `chromiumoxid` sticks to the `Command` nomenclature. So for everything that is defined as a command type in the pdl (=marked as `Method` on [vanilla.aslushnikov.com](https://vanilla.aslushnikov.com/)) `chromiumoxide` contains a type for command and a designated type for the return type. For every command there is a `<name of command>Params` type with builder support (`<name of command>Params::builder()`) and its corresponding return type: `<name of command>Returns`. All commands share an implementation of the `chromiumoxide_types::Command` trait.
-All Events are bundled in single enum (`CdpEvent`)
-
-## Fetcher
-
-By default `chromiumoxide` will try to find an installed version of chromium on the computer it runs on.
-It is possible to download and install one automatically for some platforms using the `fetcher` feature.
-
-You need to enable either the `rustls` or the `native-tls` feature and the `zip0` or `zip8` feature to allow the fetcher to download binaries.
-
-```rust
-use std::path::Path;
-
-use futures::StreamExt;
-use chromiumoxide::browser::{BrowserConfig};
-use chromiumoxide::fetcher::{BrowserFetcher, BrowserFetcherOptions};
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let download_path = Path::new("./download");
-    tokio::fs::create_dir_all(&download_path).await?;
-    let fetcher = BrowserFetcher::new(
-        BrowserFetcherOptions::builder()
-            .with_path(&download_path)
-            .build()?,
-    );
-    let info = fetcher.fetch().await?;
-
-    let config = BrowserConfig::builder()
-        .chrome_executable(info.executable_path)
-        .build()?,
-}
-```
-
-## Known Issues
-
-- The rust files generated for the PDL files in [chromiumoxide_cdp](./chromiumoxide_cdp) don't compile when support for experimental types is manually turned off (`export CDP_NO_EXPERIMENTAL=true`). This is because the use of some experimental pdl types in the `*.pdl` files themselves are not marked as experimental.
-
-## Troubleshooting
-
-Q: A new chromium instance is being launched but then times out.
-
-A: Check that your chromium language settings are set to English. `chromiumoxide` tries to parse the debugging port from the chromium process output and that is limited to english.
-
-## License
-
-Licensed under either of these:
-
-- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or
-  <https://www.apache.org/licenses/LICENSE-2.0>)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or
-  <https://opensource.org/licenses/MIT>)
-
-## References
-
-- [chromedp](https://github.com/chromedp/chromedp)
-- [rust-headless-chrome](https://github.com/atroche/rust-headless-chrome) which the launch config, `KeyDefinition` and typing support among others is taken from.
-- [puppeteer](https://github.com/puppeteer/puppeteer)
+Licensed under either the [Apache License, Version 2.0](LICENSE-APACHE) or the
+[MIT license](LICENSE-MIT), at your option.
