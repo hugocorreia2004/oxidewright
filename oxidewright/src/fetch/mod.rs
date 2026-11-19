@@ -514,6 +514,7 @@ impl APIRequestContext {
             }
             None => None,
         };
+        ensure_crypto_provider();
         let mut builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .tls_info(true)
@@ -2116,5 +2117,14 @@ mod certificate_tests {
             super::der_time(0x18, b"20330807000000Z"),
             Some(2006985600.0)
         );
+    }
+}
+
+/// Installs rustls' ring provider as the process default when none is set
+/// yet (reqwest is built without a provider of its own). A provider the
+/// application already installed is kept.
+pub(crate) fn ensure_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
     }
 }
