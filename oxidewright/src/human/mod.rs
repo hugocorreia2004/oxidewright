@@ -37,6 +37,8 @@
 //! - **Touch**: taps and swipes for mobile profiles ([`Human::mobile`]).
 
 mod correction;
+#[cfg(test)]
+mod distribution_tests;
 mod keyboard;
 mod math;
 mod mouse;

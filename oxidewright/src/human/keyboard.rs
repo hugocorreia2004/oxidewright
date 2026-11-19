@@ -558,7 +558,10 @@ mod tests {
         let s = plan('ś', KeyboardLayout::Es).unwrap();
         assert_eq!((s[0].code.as_str(), s[1].code.as_str()), ("Quote", "KeyS"));
         let s = plan('Ǹ', KeyboardLayout::Pt).unwrap();
-        assert_eq!((s[0].code.as_str(), s[0].shift, s[1].shift), ("BracketRight", true, true));
+        assert_eq!(
+            (s[0].code.as_str(), s[0].shift, s[1].shift),
+            ("BracketRight", true, true)
+        );
         // A cedilla has no dead key.
         assert!(plan('ş', KeyboardLayout::Pt).is_none());
         assert!(plan('ç', KeyboardLayout::Us).is_none());

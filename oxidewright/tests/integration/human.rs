@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::common::*;
 use oxidewright::Page;
-use oxidewright::human::{Human, KeyboardLayout, ReadStyle, ScrollDirection};
+use oxidewright::human::{Human, KeyboardLayout, ReadStyle, ScrollDirection, Speed};
 
 /// Records the trusted mouse, key, wheel and touch events of the page.
 const RECORDER: &str = r#"<script>
@@ -176,6 +176,109 @@ fn type_verified_gets_a_password_right() {
             .await
             .unwrap();
         assert_eq!(value(&t.page, "#p").await, "Señal-2024!");
+    });
+}
+
+#[test]
+fn type_verified_takes_the_typing_options() {
+    run(|t| async move {
+        t.page
+            .set_content(format!(r#"{RECORDER}<input id="e" value="old@x.pt">"#))
+            .await
+            .unwrap();
+        let human = Human::with_seed(12).layout(KeyboardLayout::Us);
+        human
+            .type_verified(&t.page.locator("#e"), "maria.s@example.com")
+            .speed(Speed::Fast)
+            .await
+            .unwrap();
+        assert_eq!(value(&t.page, "#e").await, "maria.s@example.com");
+        // No typo was made (no Backspace).
+        let ev = events(&t.page).await;
+        assert!(
+            !ev.iter()
+                .any(|e| e.kind == "keydown" && e.key.as_deref() == Some("Backspace"))
+        );
+    });
+}
+
+#[test]
+fn shift_is_held_across_capitals_and_released_before_the_next_key() {
+    run(|t| async move {
+        t.page
+            .set_content(format!(r#"{RECORDER}<input id="i">"#))
+            .await
+            .unwrap();
+        let human = Human::with_seed(13).layout(KeyboardLayout::Us);
+        human
+            .type_text(&t.page.locator("#i"), "ABc@d")
+            .errors(false)
+            .await
+            .unwrap();
+        assert_eq!(value(&t.page, "#i").await, "ABc@d");
+        let ev = events(&t.page).await;
+        let keys: Vec<&Ev> = ev
+            .iter()
+            .filter(|e| e.kind == "keydown" || e.kind == "keyup")
+            .collect();
+        let seq: Vec<String> = keys
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}{}",
+                    if e.kind == "keydown" { "+" } else { "-" },
+                    e.key.as_deref().unwrap_or("")
+                )
+            })
+            .collect();
+        // One Shift for both capitals, released before `c`; another for `@`.
+        assert_eq!(
+            seq,
+            [
+                "+Shift", "+A", "-A", "+B", "-B", "-Shift", "+c", "-c", "+Shift", "+@", "-@",
+                "-Shift", "+d", "-d"
+            ],
+            "{seq:?}"
+        );
+        // The key after a released Shift waits at least 20 ms.
+        let shift_up = keys
+            .iter()
+            .find(|e| e.kind == "keyup" && e.key.as_deref() == Some("Shift"))
+            .unwrap();
+        let c_down = keys
+            .iter()
+            .find(|e| e.kind == "keydown" && e.key.as_deref() == Some("c"))
+            .unwrap();
+        assert!(
+            c_down.t - shift_up.t >= 19.0,
+            "{} ms",
+            c_down.t - shift_up.t
+        );
+        // `@` is Shift+2 on a US keyboard.
+        let at = keys
+            .iter()
+            .find(|e| e.kind == "keydown" && e.key.as_deref() == Some("@"))
+            .unwrap();
+        assert!(at.shift && at.code.as_deref() == Some("Digit2"));
+    });
+}
+
+#[test]
+fn idle_drifts_the_mouse_on_the_last_page() {
+    run(|t| async move {
+        t.page.set_content(RECORDER).await.unwrap();
+        let human = Human::with_seed(14);
+        human.move_to(&t.page, 400.0, 300.0).await.unwrap();
+        let before = events(&t.page).await.len();
+        let start = std::time::Instant::now();
+        human.idle(1.5).await;
+        let took = start.elapsed().as_secs_f64();
+        assert!((1.4..3.5).contains(&took), "{took} s");
+        let moves = events(&t.page).await[before..]
+            .iter()
+            .filter(|e| e.kind == "mousemove")
+            .count();
+        assert!(moves > 0, "the mouse drifted");
     });
 }
 

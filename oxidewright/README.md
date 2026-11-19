@@ -185,8 +185,8 @@ human.pause(PauseKind::AfterSubmit).await;
 | Mouse | Curved paths with Perlin tremor, Fitts' law timing, a speed cap, occasional overshoot; `grid(dpr, frame_ms)` puts every point on the physical pixel grid at one move per display frame |
 | Clicks | Off-center aim, the box checked again before pressing, a human hold time, the hand drifting away after; elements brought into view with the wheel (option lists inside menus too) |
 | Typing | Log-logistic flight times, digraphs, hand alternation, warm-up, fatigue, hesitations, pauses at letter/digit/punctuation boundaries and between number groups, typos corrected like a person, the real keys of the US, UK, PT or ES layout (Shift, AltGr, dead keys), chosen with `layout(..)` or else from the browser's language (`es-ES` → Spanish) |
-| Fields | `fix_field` corrects a value in place (click at the mistake, delete only what is wrong), `append_to_field`, `type_verified` |
-| Pauses | `pause`, `read`, `think`, `maybe_distraction`, with the mouse drifting meanwhile; `read_text` reads a text with the mouse resting near the next target |
+| Fields | `fix_field` corrects a value in place (click at the mistake, delete only what is wrong), `append_to_field`, `type_verified` (with the options of `type_text`, such as `.speed(Speed::Fast)`) |
+| Pauses | `pause`, `read`, `think`, `idle`, `maybe_distraction`, with the mouse drifting meanwhile; `read_text` reads a text with the mouse resting near the next target |
 | Scrolling | Gliding wheel pushes in gestures, in the person's style; `explore` looks over a page |
 | Touch | `mobile(true)`: taps and swipes instead of clicks and the wheel |
 | Lifetime | One person per browser context (`context.human()`, `page.human()`), dropped when the context or the browser closes, even when the window is closed by hand; each page has its own mouse position, forgotten when the page closes. `Human::new()` / `with_seed(n)` make a person you own yourself |

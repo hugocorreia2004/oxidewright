@@ -44,12 +44,7 @@ impl Human {
         let cfg = self.cfg();
         let traits = self.traits();
         let rnd = self.rnd();
-        let mut mt_ms = fitts_time(rnd, dist, target_width);
-        // Even the shortest move is not instant.
-        mt_ms = mt_ms.max(rnd.uniform(180.0, 300.0));
-        if dist / mt_ms * 1000.0 > MAX_SPEED {
-            mt_ms = dist / MAX_SPEED * 1000.0;
-        }
+        let mt_ms = self.movement_ms(dist, target_width);
         let frame_ms = self.frame_ms();
         let n = if cfg.grid {
             clamp((mt_ms * cfg.pace / frame_ms).round(), 10.0, 600.0) as usize
@@ -149,6 +144,19 @@ impl Human {
         }
         self.set_mouse_position(page, x, y);
         Ok(())
+    }
+
+    /// How long (ms) a movement of `dist` px onto a target `target_width` px
+    /// wide takes: Fitts' law, never under 180-300 ms (even the shortest move
+    /// is not instant), never faster than the speed cap.
+    pub(crate) fn movement_ms(&self, dist: f64, target_width: f64) -> f64 {
+        let rnd = self.rnd();
+        let mut mt_ms = fitts_time(rnd, dist, target_width);
+        mt_ms = mt_ms.max(rnd.uniform(180.0, 300.0));
+        if dist / mt_ms * 1000.0 > MAX_SPEED {
+            mt_ms = dist / MAX_SPEED * 1000.0;
+        }
+        mt_ms
     }
 
     /// The display frame (ms), only if plausible (30-240 Hz); else 60 Hz.
