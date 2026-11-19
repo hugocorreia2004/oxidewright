@@ -9,8 +9,8 @@ use std::time::Duration;
 use super::keyboard::{
     KeyboardLayout, MOD_ALT, MOD_CTRL, MOD_SHIFT, Stroke, base_letter, key_event, plan,
 };
-use super::math::{clamp, hand_multiplier, left_hand};
-use super::{Human, page_of};
+use super::math::{Rnd, clamp, hand_multiplier};
+use super::{Human, Traits, page_of};
 use crate::{CDPSession, Locator, Page, Result};
 
 /// How fast to type, relative to the person's own rhythm.
@@ -186,6 +186,28 @@ fn is_upper(c: char) -> bool {
 /// The minimum between releasing Shift and the next key, whatever the pace.
 const AFTER_SHIFT_MIN_MS: f64 = 20.0;
 
+/// The left-hand keys for the choice of Shift: letters, digits and the
+/// backquote only. The shifted symbols (`!`, `@`, `#`, `$`, `%`, `~`) do not
+/// count, so their Shift is usually the left one.
+const SHIFT_LEFT_HAND: &str = "qwertasdfgzxcvb12345`";
+
+/// The Shift key (code, location) pressed to type `ch`: the hand that does
+/// not type the key presses it (right Shift for a left-hand key 80% of the
+/// time, left Shift otherwise 90% of the time).
+pub(crate) fn shift_key(rnd: &Rnd, ch: char) -> (&'static str, i64) {
+    let left = SHIFT_LEFT_HAND.contains(base_letter(ch));
+    let right = if left {
+        rnd.random() < 0.8
+    } else {
+        rnd.random() < 0.1
+    };
+    if right {
+        ("ShiftRight", 2)
+    } else {
+        ("ShiftLeft", 1)
+    }
+}
+
 /// Presses the keys of one text: each character with the physical keys of
 /// the layout (Shift, AltGr, dead key), Shift kept down between consecutive
 /// capitals and released before a key without it.
@@ -316,19 +338,8 @@ impl Writer<'_> {
         if self.shift.is_some() {
             return Ok(());
         }
-        // The hand that does not type the key presses Shift (almost always).
         let rnd = self.human.rnd();
-        let left = left_hand(base_letter(ch));
-        let right = if left {
-            rnd.random() < 0.8
-        } else {
-            rnd.random() < 0.1
-        };
-        let shift = if right {
-            ("ShiftRight", 2)
-        } else {
-            ("ShiftLeft", 1)
-        };
+        let shift = shift_key(rnd, ch);
         self.shift = Some(shift);
         self.send(key_event(true, "Shift", shift.0, "", MOD_SHIFT, shift.1))
             .await?;
@@ -453,6 +464,7 @@ impl Human {
             errors: true,
             focused: false,
             groups: Vec::new(),
+            verify: false,
         }
     }
 
@@ -491,7 +503,7 @@ impl Human {
         Ok(())
     }
 
-    async fn run_type(&self, t: &TypeText) -> Result<()> {
+    pub(super) async fn run_type(&self, t: &TypeText) -> Result<()> {
         let page = page_of(&t.locator)?;
         let cfg = self.cfg();
         if !cfg.human_typing {
@@ -518,52 +530,83 @@ impl Human {
         result.and(released)
     }
 
+    /// The time (ms) between key `i - 1` and key `i` of `text`: log-logistic,
+    /// adjusted by the letter pair, the hands, warm-up and fatigue, a pause
+    /// after a space, now and then a hesitation, and the pauses between
+    /// blocks (`groups`: the block starts) or, without blocks, at the
+    /// boundaries of the content.
+    pub(crate) fn flight_ms(
+        &self,
+        traits: &Traits,
+        text: &[char],
+        i: usize,
+        (alpha, beta): (f64, f64),
+        groups: Option<&HashSet<usize>>,
+    ) -> f64 {
+        let rnd = self.rnd();
+        let (prev, ch) = (text[i - 1], text[i]);
+        let mut fl = rnd.log_logistic(alpha, beta);
+        let pair: String = prev.to_lowercase().chain(ch.to_lowercase()).collect();
+        fl *= digraph(&pair);
+        fl *= hand_multiplier(rnd, prev, ch);
+        if i < traits.warmup_chars {
+            fl *= traits.warmup_factor;
+        }
+        fl *= 1.0 + i as f64 * traits.fatigue_rate;
+        if prev == ' ' && ch != ' ' {
+            fl += rnd.uniform(25.0, 55.0);
+        }
+        fl = clamp(fl, 25.0, 900.0);
+        if rnd.random() < traits.hesitation_chance {
+            fl += rnd.uniform(180.0, 650.0);
+        }
+        if let Some(boundaries) = groups {
+            // Next block (day → month, a phone group): a longer pause.
+            if boundaries.contains(&i) {
+                fl += rnd.uniform(220.0, 600.0);
+            }
+        } else if let Some((lo, hi)) = boundary_bump(prev, ch) {
+            fl += rnd.uniform(lo, hi);
+        } else if is_digit(prev) && is_digit(ch) {
+            // A long number (card, phone): a pause every ~4 digits.
+            let back = text[..i].iter().rev().take_while(|c| is_digit(**c)).count();
+            let ahead = text[i..].iter().take_while(|c| is_digit(**c)).count();
+            if back + ahead >= 8 && back % 4 == 0 {
+                fl += rnd.uniform(110.0, 280.0);
+            }
+        }
+        fl
+    }
+
+    /// The parameters (alpha, beta) of the time between keys at `speed`
+    /// for this person, and the chance of a typo per key.
+    pub(crate) fn rhythm(&self, traits: &Traits, speed: Speed) -> ((f64, f64), f64) {
+        let (mut alpha, mut beta) = speed.params();
+        alpha *= traits.typing_rhythm;
+        beta = (beta + traits.flight_sigma_offset).max(2.0);
+        // Slow typists make a few more mistakes.
+        let error_rate = self.rnd().uniform(0.015, 0.04) * clamp(traits.typing_rhythm, 0.8, 1.5);
+        ((alpha, beta), error_rate)
+    }
+
     async fn type_chars(&self, w: &mut Writer<'_>, t: &TypeText) -> Result<()> {
         let rnd = self.rnd();
         let traits = self.traits();
         let text: Vec<char> = t.text.chars().collect();
-        let (mut alpha, mut beta) = t.speed.params();
-        alpha *= traits.typing_rhythm;
-        beta = (beta + traits.flight_sigma_offset).max(2.0);
-        // Slow typists make a few more mistakes.
-        let error_rate = rnd.uniform(0.015, 0.04) * clamp(traits.typing_rhythm, 0.8, 1.5);
+        let ((alpha, beta), error_rate) = self.rhythm(&traits, t.speed);
         let n = text.len();
         let boundaries = group_boundaries(&t.groups, n);
         let mut i = 0;
         while i < n {
             let ch = text[i];
             if i > 0 {
-                let prev = text[i - 1];
-                let mut fl = rnd.log_logistic(alpha, beta);
-                let pair: String = prev.to_lowercase().chain(ch.to_lowercase()).collect();
-                fl *= digraph(&pair);
-                fl *= hand_multiplier(rnd, prev, ch);
-                if i < traits.warmup_chars {
-                    fl *= traits.warmup_factor;
-                }
-                fl *= 1.0 + i as f64 * traits.fatigue_rate;
-                if prev == ' ' && ch != ' ' {
-                    fl += rnd.uniform(25.0, 55.0);
-                }
-                fl = clamp(fl, 25.0, 900.0);
-                if rnd.random() < traits.hesitation_chance {
-                    fl += rnd.uniform(180.0, 650.0);
-                }
-                if !t.groups.is_empty() {
-                    // Next block (day → month, a phone group): a longer pause.
-                    if boundaries.contains(&i) {
-                        fl += rnd.uniform(220.0, 600.0);
-                    }
-                } else if let Some((lo, hi)) = boundary_bump(prev, ch) {
-                    fl += rnd.uniform(lo, hi);
-                } else if is_digit(prev) && is_digit(ch) {
-                    // A long number (card, phone): a pause every ~4 digits.
-                    let back = text[..i].iter().rev().take_while(|c| is_digit(**c)).count();
-                    let ahead = text[i..].iter().take_while(|c| is_digit(**c)).count();
-                    if back + ahead >= 8 && back % 4 == 0 {
-                        fl += rnd.uniform(110.0, 280.0);
-                    }
-                }
+                let fl = self.flight_ms(
+                    &traits,
+                    &text,
+                    i,
+                    (alpha, beta),
+                    (!t.groups.is_empty()).then_some(&boundaries),
+                );
                 self.sleep(fl).await;
             }
 
@@ -616,17 +659,19 @@ fn typo_char(human: &Human, c: char) -> Option<char> {
     })
 }
 
-/// Builder returned by [`Human::type_text`]; `.await` it.
+/// Builder returned by [`Human::type_text`] and [`Human::type_verified`]; `.await` it.
+#[derive(Clone)]
 #[must_use = "builders do nothing unless awaited"]
 pub struct TypeText {
-    human: Human,
-    locator: Locator,
-    text: String,
-    speed: Speed,
-    timeout_ms: u64,
-    errors: bool,
-    focused: bool,
-    groups: Vec<usize>,
+    pub(super) human: Human,
+    pub(super) locator: Locator,
+    pub(super) text: String,
+    pub(super) speed: Speed,
+    pub(super) timeout_ms: u64,
+    pub(super) errors: bool,
+    pub(super) focused: bool,
+    pub(super) groups: Vec<usize>,
+    pub(super) verify: bool,
 }
 
 impl TypeText {
@@ -661,6 +706,16 @@ impl TypeText {
         self.groups = groups.into();
         self
     }
+
+    /// For fields that must be right (an email, a password): type without
+    /// typos, read the value back and, if it is wrong, fix it in place (a
+    /// visible field) or clear it and retype it carefully once (a password).
+    /// Fails if it is still wrong. A field that already holds text is
+    /// cleared first. [`Human::type_verified`] turns it on.
+    pub fn verify(mut self, verify: bool) -> Self {
+        self.verify = verify;
+        self
+    }
 }
 
 impl IntoFuture for TypeText {
@@ -668,7 +723,14 @@ impl IntoFuture for TypeText {
     type IntoFuture = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
-        Box::pin(async move { self.human.clone().run_type(&self).await })
+        Box::pin(async move {
+            let human = self.human.clone();
+            if self.verify {
+                human.run_verified(&self).await
+            } else {
+                human.run_type(&self).await
+            }
+        })
     }
 }
 
@@ -685,6 +747,28 @@ mod tests {
         assert!(group_boundaries(&[4], 4).is_empty());
         // More groups than text: no boundary outside it.
         assert_eq!(group_boundaries(&[2, 2, 4], 3), [2].into_iter().collect());
+    }
+
+    #[test]
+    fn shift_is_pressed_by_the_other_hand() {
+        let rnd = Rnd::new(Some(5));
+        let right_share = |ch: char| {
+            let n = 20_000;
+            let right = (0..n)
+                .filter(|_| shift_key(&rnd, ch).0 == "ShiftRight")
+                .count();
+            right as f64 / n as f64
+        };
+        // Left-hand letters and digits: right Shift 80%.
+        for ch in ['A', 'Q', 'Z', 'Ç', 'Ã'] {
+            let r = right_share(ch);
+            assert!((r - 0.8).abs() < 0.015, "{ch}: {r}");
+        }
+        // Right-hand letters and every shifted symbol: right Shift 10%.
+        for ch in ['P', 'Ñ', '@', '!', '#', '$', '%', '~', '"', '?'] {
+            let r = right_share(ch);
+            assert!((r - 0.1).abs() < 0.015, "{ch}: {r}");
+        }
     }
 
     #[test]

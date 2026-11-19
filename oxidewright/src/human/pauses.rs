@@ -54,6 +54,32 @@ pub enum ReadingKind {
     Default,
 }
 
+impl ReadingKind {
+    /// (duration s, with the mouse, chance of just thinking, chance of skipping).
+    fn profile(self) -> ((f64, f64), bool, f64, f64) {
+        match self {
+            ReadingKind::BeforePassword => ((2.0, 5.0), true, 0.5, 0.0),
+            ReadingKind::BeforeName => ((0.4, 1.2), true, 0.0, 0.0),
+            ReadingKind::BetweenRelated => ((0.15, 0.6), false, 0.0, 0.4),
+            ReadingKind::BeforeAddress => ((2.5, 5.5), true, 0.6, 0.0),
+            ReadingKind::BeforeAction => ((1.0, 3.5), true, 0.3, 0.0),
+            ReadingKind::ScanningPage => ((1.5, 4.0), true, 0.0, 0.0),
+            ReadingKind::AfterError => ((2.0, 4.0), true, 0.7, 0.0),
+            ReadingKind::CookieConsent => ((0.8, 2.5), true, 0.05, 0.0),
+            ReadingKind::Default => ((1.0, 3.0), true, 0.1, 0.0),
+        }
+    }
+}
+
+/// A drawn reading: a glance (ms, when skipped), thinking without moving
+/// (s), or looking (s) with or without the mouse drifting.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Reading {
+    Glance(f64),
+    Think(f64),
+    Look { seconds: f64, mouse: bool },
+}
+
 /// Scroll direction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollDirection {
@@ -195,6 +221,34 @@ impl Human {
     /// A pause after `kind`, with the mouse drifting (on the last page this
     /// person used) when it lasts half a second or more. At most 15 s.
     pub async fn pause(&self, kind: PauseKind) {
+        let delay = self.pause_s(kind);
+        if delay >= 0.5 {
+            if let Some(page) = self.last_page() {
+                if self.drift(&page, delay).await.is_ok() {
+                    return;
+                }
+            }
+        }
+        self.sleep(delay * 1000.0).await;
+    }
+
+    /// Wait `seconds` (stretched by the pace) with the mouse drifting on the
+    /// last page this person used, like a person waiting for something to
+    /// arrive. Without a page, or if the mouse fails, a plain wait.
+    pub async fn idle(&self, seconds: f64) {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return;
+        }
+        if let Some(page) = self.last_page() {
+            if self.drift(&page, seconds).await.is_ok() {
+                return;
+            }
+        }
+        self.sleep(seconds * 1000.0).await;
+    }
+
+    /// How long a pause after `kind` lasts, seconds.
+    pub(crate) fn pause_s(&self, kind: PauseKind) -> f64 {
         let rnd = self.rnd();
         let mut delay = match kind {
             PauseKind::PageLoad => rnd.lognorm(7.5, 0.4) / 1000.0,
@@ -210,45 +264,37 @@ impl Human {
         if kind == PauseKind::Polling {
             delay = delay.max(0.2);
         }
-        delay = delay.min(15.0);
-        if delay >= 0.5 {
-            if let Some(page) = self.last_page() {
-                if self.drift(&page, delay).await.is_ok() {
-                    return;
-                }
-            }
-        }
-        self.sleep(delay * 1000.0).await;
+        delay.min(15.0)
     }
 
     /// Look at the screen before acting, with the mouse drifting.
     pub async fn read(&self, page: &Page, kind: ReadingKind) {
-        // (duration s, with the mouse, chance of just thinking, chance of skipping)
-        let (dur, mouse, think, skip) = match kind {
-            ReadingKind::BeforePassword => ((2.0, 5.0), true, 0.5, 0.0),
-            ReadingKind::BeforeName => ((0.4, 1.2), true, 0.0, 0.0),
-            ReadingKind::BetweenRelated => ((0.15, 0.6), false, 0.0, 0.4),
-            ReadingKind::BeforeAddress => ((2.5, 5.5), true, 0.6, 0.0),
-            ReadingKind::BeforeAction => ((1.0, 3.5), true, 0.3, 0.0),
-            ReadingKind::ScanningPage => ((1.5, 4.0), true, 0.0, 0.0),
-            ReadingKind::AfterError => ((2.0, 4.0), true, 0.7, 0.0),
-            ReadingKind::CookieConsent => ((0.8, 2.5), true, 0.05, 0.0),
-            ReadingKind::Default => ((1.0, 3.0), true, 0.1, 0.0),
-        };
+        match self.reading_plan(kind) {
+            Reading::Glance(ms) => self.sleep(ms).await,
+            Reading::Think(s) => self.sleep(s * 1000.0).await,
+            Reading::Look { seconds, mouse } => {
+                if mouse && self.drift(page, seconds).await.is_ok() {
+                    return;
+                }
+                self.sleep(seconds * 1000.0).await;
+            }
+        }
+    }
+
+    /// What a reading of `kind` does, drawn.
+    pub(crate) fn reading_plan(&self, kind: ReadingKind) -> Reading {
+        let (dur, mouse, think, skip) = kind.profile();
         let rnd = self.rnd();
         if rnd.random() < skip {
-            self.sleep(rnd.uniform(40.0, 120.0)).await;
-            return;
+            return Reading::Glance(rnd.uniform(40.0, 120.0));
         }
         if rnd.random() < think {
-            self.sleep(self.delay_s(dur.0, dur.1) * 1000.0).await;
-            return;
+            return Reading::Think(self.delay_s(dur.0, dur.1));
         }
-        let s = self.delay_s(dur.0, dur.1);
-        if mouse && self.drift(page, s).await.is_ok() {
-            return;
+        Reading::Look {
+            seconds: self.delay_s(dur.0, dur.1),
+            mouse,
         }
-        self.sleep(s * 1000.0).await;
     }
 
     /// Think for `min_s`-`max_s` seconds (scaled by the person's speed), without moving.

@@ -6,7 +6,7 @@
 use serde::Deserialize;
 
 use super::math::clamp;
-use super::{Human, Speed, page_of};
+use super::{Human, Speed, TypeText, page_of};
 use crate::{Error, Locator, Result};
 
 /// What changes `current` into `expected`: where to put the caret, how many
@@ -203,13 +203,23 @@ impl Human {
     /// For fields that must be right (an email, a password): type without
     /// typos, read the value back, and if it is wrong, fix it in place (a
     /// visible field) or clear and retype it carefully once (a password).
-    /// Fails if it is still wrong.
-    pub async fn type_verified(&self, field: &Locator, text: &str) -> Result<()> {
+    /// Fails if it is still wrong. The first typing takes the options of the
+    /// returned [`TypeText`] (`.speed(Speed::Fast)`, `.groups(...)`...); the
+    /// retyping is always careful.
+    pub fn type_verified(&self, field: &Locator, text: impl Into<String>) -> TypeText {
+        self.type_text(field, text).verify(true)
+    }
+
+    pub(super) async fn run_verified(&self, t: &TypeText) -> Result<()> {
+        let (field, text) = (&t.locator, t.text.as_str());
         // A prefilled field would join the old text with the new one.
         if field.input_value().await.is_ok_and(|v| !v.is_empty()) {
             let _ = field.clear().await;
         }
-        self.type_text(field, text).errors(false).await?;
+        let mut first = t.clone();
+        first.errors = false;
+        first.verify = false;
+        self.run_type(&first).await?;
         let read = field.input_value().await?;
         if read == text {
             return Ok(());

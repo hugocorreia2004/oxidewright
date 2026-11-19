@@ -317,10 +317,6 @@ fn lower(c: char) -> char {
     c.to_lowercase().next().unwrap_or(c)
 }
 
-pub(crate) fn left_hand(c: char) -> bool {
-    LEFT_HAND.contains(lower(c))
-}
-
 /// Keys typed with opposite hands follow each other faster.
 pub(crate) fn hand_multiplier(rnd: &Rnd, a: char, b: char) -> f64 {
     let (la, ra) = (LEFT_HAND.contains(lower(a)), RIGHT_HAND.contains(lower(a)));
