@@ -9,7 +9,7 @@ use std::time::Duration;
 use super::keyboard::{
     KeyboardLayout, MOD_ALT, MOD_CTRL, MOD_SHIFT, Stroke, base_letter, key_event, plan,
 };
-use super::math::{clamp, hand_multiplier, left_hand};
+use super::math::{Rnd, clamp, hand_multiplier};
 use super::{Human, page_of};
 use crate::{CDPSession, Locator, Page, Result};
 
@@ -186,6 +186,28 @@ fn is_upper(c: char) -> bool {
 /// The minimum between releasing Shift and the next key, whatever the pace.
 const AFTER_SHIFT_MIN_MS: f64 = 20.0;
 
+/// The left-hand keys for the choice of Shift: letters, digits and the
+/// backquote only. The shifted symbols (`!`, `@`, `#`, `$`, `%`, `~`) do not
+/// count, so their Shift is usually the left one.
+const SHIFT_LEFT_HAND: &str = "qwertasdfgzxcvb12345`";
+
+/// The Shift key (code, location) pressed to type `ch`: the hand that does
+/// not type the key presses it (right Shift for a left-hand key 80% of the
+/// time, left Shift otherwise 90% of the time).
+pub(crate) fn shift_key(rnd: &Rnd, ch: char) -> (&'static str, i64) {
+    let left = SHIFT_LEFT_HAND.contains(base_letter(ch));
+    let right = if left {
+        rnd.random() < 0.8
+    } else {
+        rnd.random() < 0.1
+    };
+    if right {
+        ("ShiftRight", 2)
+    } else {
+        ("ShiftLeft", 1)
+    }
+}
+
 /// Presses the keys of one text: each character with the physical keys of
 /// the layout (Shift, AltGr, dead key), Shift kept down between consecutive
 /// capitals and released before a key without it.
@@ -316,19 +338,8 @@ impl Writer<'_> {
         if self.shift.is_some() {
             return Ok(());
         }
-        // The hand that does not type the key presses Shift (almost always).
         let rnd = self.human.rnd();
-        let left = left_hand(base_letter(ch));
-        let right = if left {
-            rnd.random() < 0.8
-        } else {
-            rnd.random() < 0.1
-        };
-        let shift = if right {
-            ("ShiftRight", 2)
-        } else {
-            ("ShiftLeft", 1)
-        };
+        let shift = shift_key(rnd, ch);
         self.shift = Some(shift);
         self.send(key_event(true, "Shift", shift.0, "", MOD_SHIFT, shift.1))
             .await?;
@@ -685,6 +696,28 @@ mod tests {
         assert!(group_boundaries(&[4], 4).is_empty());
         // More groups than text: no boundary outside it.
         assert_eq!(group_boundaries(&[2, 2, 4], 3), [2].into_iter().collect());
+    }
+
+    #[test]
+    fn shift_is_pressed_by_the_other_hand() {
+        let rnd = Rnd::new(Some(5));
+        let right_share = |ch: char| {
+            let n = 20_000;
+            let right = (0..n)
+                .filter(|_| shift_key(&rnd, ch).0 == "ShiftRight")
+                .count();
+            right as f64 / n as f64
+        };
+        // Left-hand letters and digits: right Shift 80%.
+        for ch in ['A', 'Q', 'Z', 'Ç', 'Ã'] {
+            let r = right_share(ch);
+            assert!((r - 0.8).abs() < 0.015, "{ch}: {r}");
+        }
+        // Right-hand letters and every shifted symbol: right Shift 10%.
+        for ch in ['P', 'Ñ', '@', '!', '#', '$', '%', '~', '"', '?'] {
+            let r = right_share(ch);
+            assert!((r - 0.1).abs() < 0.015, "{ch}: {r}");
+        }
     }
 
     #[test]
