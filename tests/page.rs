@@ -9,6 +9,33 @@ use tokio::time::timeout;
 
 use crate::test;
 
+/// As in Playwright, every page emulates focus: a page in the background
+/// still has `document.hasFocus()` and is `visible`. (Without it, a window
+/// Chrome sees as occluded — minimised, covered, or the screen locked on
+/// Windows — is `hidden`, produces no frames, and a `mouseWheel` never gets
+/// its reply.)
+#[tokio::test]
+async fn test_pages_emulate_focus_like_playwright() {
+    test(async |browser| {
+        let a = browser
+            .new_page("data:text/html,<p>a</p>")
+            .await
+            .expect("should create the first page");
+        let _b = browser
+            .new_page("data:text/html,<p>b</p>")
+            .await
+            .expect("should create the second page");
+        let state: String = a
+            .evaluate_main_world("document.hasFocus() + '/' + document.visibilityState")
+            .await
+            .expect("should evaluate on the background page")
+            .into_value()
+            .expect("should convert to a string");
+        assert_eq!(state, "true/visible");
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn test_evaluate_on_new_document() {
     test(async |browser| {
