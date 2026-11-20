@@ -24,6 +24,7 @@ use chromiumoxide_cdp::cdp::browser_protocol::page::{
 };
 use chromiumoxide_cdp::cdp::browser_protocol::{
     browser::BrowserContextId,
+    emulation::SetFocusEmulationEnabledParams,
     log as cdplog, network as cdp_network, performance,
     security::SetIgnoreCertificateErrorsParams,
     target::{
@@ -2279,8 +2280,16 @@ impl Target {
         self.initiator_deadline = Some(Instant::now() + self.config.request_timeout);
     }
 
-    /// With the `stealth` feature only auto-attach is sent: `Log.enable` and
-    /// `Performance.enable` are left to the caller.
+    /// With the `stealth` feature `Log.enable` and `Performance.enable` are
+    /// left to the caller.
+    ///
+    /// Focus emulation is always on, as in Playwright (`FrameSession` sends
+    /// `Emulation.setFocusEmulationEnabled` to every main frame): the page
+    /// behaves as focused and visible even when its window is not. Without it,
+    /// a window that Chrome sees as occluded (minimised, covered, or the
+    /// screen locked on Windows) is `visibilityState = "hidden"`, stops
+    /// producing frames, and `Input.dispatchMouseEvent` of type `mouseWheel`
+    /// never gets its reply.
     pub(crate) fn page_init_commands(timeout: Duration) -> CommandChain {
         let attach = SetAutoAttachParams::builder()
             .flatten(true)
@@ -2288,7 +2297,11 @@ impl Target {
             .wait_for_debugger_on_start(true)
             .build()
             .unwrap();
-        let mut commands = vec![(attach.identifier(), serde_json::to_value(attach).unwrap())];
+        let focus = SetFocusEmulationEnabledParams::new(true);
+        let mut commands = vec![
+            (attach.identifier(), serde_json::to_value(attach).unwrap()),
+            (focus.identifier(), serde_json::to_value(focus).unwrap()),
+        ];
         if !cfg!(feature = "stealth") {
             let enable_performance = performance::EnableParams::default();
             let enable_log = cdplog::EnableParams::default();
