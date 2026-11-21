@@ -315,8 +315,26 @@ fn scrolls_with_the_wheel_to_click_a_far_element() {
 #[test]
 fn on_the_grid_moves_are_whole_pixels_one_per_frame() {
     run(|t| async move {
+        const FRAME: f64 = 1000.0 / 60.0;
+        // How long one move takes to be answered on this machine. The grid
+        // sends the next move at least half a frame after the last one was
+        // answered, so a slow machine (the macOS CI runner: 38–55 ms median
+        // gaps) skips to a later frame instead of sending in a burst.
+        let mut round_trips = Vec::new();
+        for i in 0..9 {
+            let start = std::time::Instant::now();
+            t.page
+                .mouse()
+                .move_to(5.0 + f64::from(i), 5.0)
+                .await
+                .unwrap();
+            round_trips.push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        round_trips.sort_by(f64::total_cmp);
+        let round_trip = round_trips[round_trips.len() / 2];
+
         t.page.set_content(RECORDER).await.unwrap();
-        let human = Human::with_seed(6).grid(1.0, 1000.0 / 60.0);
+        let human = Human::with_seed(6).grid(1.0, FRAME);
         human.move_to(&t.page, 700.0, 500.0).await.unwrap();
         human.move_to(&t.page, 200.0, 150.0).await.unwrap();
         let ev = events(&t.page).await;
@@ -326,12 +344,21 @@ fn on_the_grid_moves_are_whole_pixels_one_per_frame() {
             assert_eq!(m.x.unwrap().fract(), 0.0);
             assert_eq!(m.y.unwrap().fract(), 0.0);
         }
-        // Intervals between moves: a whole number of frames (~16.7 ms),
-        // except the pause between the two movements.
+        // Intervals between moves: never faster than a frame (~16.7 ms; no
+        // bursts) and, where a move is answered within half a frame, exactly
+        // one frame. Slower machines get a whole number of frames more.
         let mut gaps: Vec<f64> = moves.windows(2).map(|w| w[1].t - w[0].t).collect();
         gaps.sort_by(f64::total_cmp);
         let median = gaps[gaps.len() / 2];
-        assert!((12.0..=22.0).contains(&median), "median gap {median} ms");
+        let max = if round_trip < FRAME / 2.0 {
+            22.0
+        } else {
+            ((round_trip + FRAME / 2.0) / FRAME).ceil() * FRAME + FRAME + 5.0
+        };
+        assert!(
+            (12.0..=max).contains(&median),
+            "median gap {median} ms (move round trip {round_trip:.1} ms, max {max:.1} ms)"
+        );
     });
 }
 
