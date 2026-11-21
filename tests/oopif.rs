@@ -555,6 +555,19 @@ async fn preload_scripts_replay_once_before_and_after_oopif_attach() {
     .await;
 }
 
+/// Releasing a request the test does not care about. One paused just before
+/// `set_request_interception(false)` can still be in the stream: Chrome
+/// continues it by itself when Fetch is disabled, so answering it afterwards
+/// gets "Invalid InterceptionId". That race is not what the test checks (it
+/// failed on CI once, with the same code that had just passed).
+fn unrelated_released(result: Result<(), CdpError>) {
+    match result {
+        Ok(()) => {}
+        Err(CdpError::Chrome(e)) if e.message == "Invalid InterceptionId." => {}
+        Err(e) => panic!("unrelated request is released: {e:?}"),
+    }
+}
+
 #[tokio::test]
 async fn interception_uses_captured_oop_session_and_child_fallback() {
     let server = OopifServer::start().expect("local OOPIF server starts");
@@ -620,10 +633,7 @@ async fn interception_uses_captured_oop_session_and_child_fallback() {
                     if paused.event().request.url == child_url {
                         break paused;
                     }
-                    paused
-                        .continue_request()
-                        .await
-                        .expect("unrelated request is released");
+                    unrelated_released(paused.continue_request().await);
                 }
             }
         };
@@ -657,10 +667,7 @@ async fn interception_uses_captured_oop_session_and_child_fallback() {
                     if paused.event().request.url == aborted_url {
                         break paused;
                     }
-                    paused
-                        .continue_request()
-                        .await
-                        .expect("unrelated request is released");
+                    unrelated_released(paused.continue_request().await);
                 }
             }
         };
