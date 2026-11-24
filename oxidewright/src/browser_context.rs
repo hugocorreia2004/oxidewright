@@ -313,11 +313,14 @@ impl BrowserContext {
                 return Err(Error::invalid_argument("Please use browser.newContext()"));
             }
             let browser = self.browser_inner()?;
+            // Exactly Playwright's `Target.createTarget` (crBrowser.ts): no
+            // `newWindow`, so the page opens as a tab of the context's window.
+            // A background tab still renders, takes screenshots and gets wheel
+            // events: every page gets `Emulation.setFocusEmulationEnabled`,
+            // which Chromium implements as an active capture that keeps the
+            // page visible (`IncrementCapturerCount(stay_hidden=false)`).
             let mut params = CreateTargetParams::new("about:blank");
             params.browser_context_id = self.inner.id.clone();
-            // Each page gets its own window (like Playwright's pages): a background
-            // tab of a shared window would not render, so screenshots would stall.
-            params.new_window = Some(true);
             let cdp = browser.new_cdp_page(params).await?;
             self.adopt_page(cdp).await
         }
