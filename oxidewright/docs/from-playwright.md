@@ -254,7 +254,8 @@ install locations like Playwright's registry), `args`, `ignore_default_args(true
 | `context.grantPermissions()` | `context.grant_permissions(permissions).await` |  |
 | `context.isClosed()` | `context.is_closed()` |  |
 | `context.newCDPSession()` | `context.new_cdp_session(&page).await` | or `&frame` |
-| `context.newPage()` | `context.new_page().await` |  |
+| `context.newPage()` | `context.new_page().await` | a tab of the context's window, as in Playwright |
+| — | `context.new_window_page().await` | not in Playwright: a page of the context in a window of its own, which keeps full rate while another page is in front (some Chromium builds with a visible window draw a background tab at about one frame a second, and every mouse move waits for one) |
 | `context.pages()` | `context.pages()` |  |
 | `context.route()` | `context.route(url, \|route\| async move { .. }).await` |  |
 | `context.routeFromHAR()` | `context.route_from_har(path).await` |  |

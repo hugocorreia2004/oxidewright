@@ -303,29 +303,50 @@ impl BrowserContext {
         Ok(page)
     }
 
-    /// Open a new page in this context.
+    /// Open a new page in this context, as a tab of the context's window
+    /// (like Playwright).
+    ///
+    /// A tab behind the front one is reported visible (focus emulation), but
+    /// some Chromium builds with a visible window draw it at about one frame
+    /// a second, and then every mouse move waits up to a second for the
+    /// browser's acknowledgement (the Chrome that oxidewright launches does
+    /// not). To drive two pages of one context at the same time there, open
+    /// the second with [`BrowserContext::new_window_page`].
     pub async fn new_page(&self) -> Result<Page> {
-        async {
-            if self.inner.closed.load(Ordering::SeqCst) {
-                return Err(Error::target_closed());
-            }
-            if self.inner.owner_page.lock().unwrap().is_some() {
-                return Err(Error::invalid_argument("Please use browser.newContext()"));
-            }
-            let browser = self.browser_inner()?;
-            // Exactly Playwright's `Target.createTarget` (crBrowser.ts): no
-            // `newWindow`, so the page opens as a tab of the context's window.
-            // A background tab still renders, takes screenshots and gets wheel
-            // events: every page gets `Emulation.setFocusEmulationEnabled`,
-            // which Chromium implements as an active capture that keeps the
-            // page visible (`IncrementCapturerCount(stay_hidden=false)`).
-            let mut params = CreateTargetParams::new("about:blank");
-            params.browser_context_id = self.inner.id.clone();
-            let cdp = browser.new_cdp_page(params).await?;
-            self.adopt_page(cdp).await
+        self.create_page(false).await.api("browserContext.newPage")
+    }
+
+    /// Open a new page in this context in a window of its own (not part of
+    /// Playwright). Same session as [`BrowserContext::new_page`] (cookies,
+    /// storage, init scripts, routes), but the page is the front tab of its
+    /// own window, so it keeps drawing at full rate while another page of
+    /// the context is in front, even where background tabs are throttled.
+    /// A window covered by another one keeps full rate too; a minimized
+    /// window does not.
+    pub async fn new_window_page(&self) -> Result<Page> {
+        self.create_page(true)
+            .await
+            .api("browserContext.newWindowPage")
+    }
+
+    async fn create_page(&self, new_window: bool) -> Result<Page> {
+        if self.inner.closed.load(Ordering::SeqCst) {
+            return Err(Error::target_closed());
         }
-        .await
-        .api("browserContext.newPage")
+        if self.inner.owner_page.lock().unwrap().is_some() {
+            return Err(Error::invalid_argument("Please use browser.newContext()"));
+        }
+        let browser = self.browser_inner()?;
+        // Playwright's `Target.createTarget` (crBrowser.ts) is `url` and
+        // `browserContextId` only, which opens a tab; `newWindow` is the
+        // window of `new_window_page`.
+        let mut params = CreateTargetParams::new("about:blank");
+        params.browser_context_id = self.inner.id.clone();
+        if new_window {
+            params.new_window = Some(true);
+        }
+        let cdp = browser.new_cdp_page(params).await?;
+        self.adopt_page(cdp).await
     }
 
     /// Default timeout (ms) of actions of every page of the context.
